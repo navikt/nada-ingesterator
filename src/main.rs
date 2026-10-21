@@ -1,5 +1,5 @@
-use std::time::Duration;
 use sqlx::postgres::PgPoolOptions;
+use std::time::Duration;
 
 mod database;
 
@@ -16,5 +16,9 @@ async fn main() {
         .await
         .expect("database is offline");
 
-    println!("Connection success, bye");
+    println!("Connection success");
+    
+    database::setup_logical_replication(&pool).await.unwrap();
+
+    println!("Database setup for logical replication");
 }
