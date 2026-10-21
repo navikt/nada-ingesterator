@@ -1,3 +1,4 @@
+use crate::database::ReplicationConfig;
 use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
 
@@ -17,8 +18,18 @@ async fn main() {
         .expect("database is offline");
 
     println!("Connection success");
-    
+
+    let config = ReplicationConfig {
+        username: "cdc_replication".to_string(),
+        password: "strong_password".to_string(),
+        database: "ingesterator".to_string(),
+        tables: vec![],
+    };
+
     database::setup_logical_replication(&pool).await.unwrap();
+    database::create_replication_role(&pool, &config)
+        .await
+        .unwrap();
 
     println!("Database setup for logical replication");
 }

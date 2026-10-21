@@ -1,4 +1,12 @@
-use sqlx::{Pool, Postgres};
+use sqlx::{AssertSqlSafe, Pool, Postgres};
+
+#[derive(Debug, Clone)]
+pub struct ReplicationConfig {
+    pub username: String,
+    pub password: String,
+    pub database: String,
+    pub tables: Vec<String>,
+}
 
 pub async fn setup_logical_replication(pool: &Pool<Postgres>) -> Result<(), sqlx::Error> {
     // Enable logical replication (requires restart)
@@ -26,4 +34,37 @@ pub async fn setup_logical_replication(pool: &Pool<Postgres>) -> Result<(), sqlx
         .await?;
 
     Ok(())
+}
+
+/// Create a replication user and grant privileges.
+///
+/// Note that parametrized values are not supported for these kinds of queries,
+/// so we do manual SQL string injection here.
+pub async fn create_replication_role(
+    pool: &Pool<Postgres>,
+    config: &ReplicationConfig,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    // Use dedicated user with minimal privileges.
+    let sql = AssertSqlSafe(format!(
+        "CREATE ROLE {} WITH REPLICATION LOGIN PASSWORD '{}';",
+        config.username, config.password
+    ));
+    sqlx::query(sql).execute(&mut *tx).await?;
+
+    // Create replication user with minimal privileges
+    let sql = AssertSqlSafe(format!(
+        "GRANT CONNECT ON DATABASE {} TO {};",
+        config.database, config.username,
+    ));
+    sqlx::query(sql).execute(&mut *tx).await?;
+
+    // Grant replication permissions on tables
+    for table in &config.tables {
+        let sql = AssertSqlSafe(format!("GRANT SELECT ON {} TO {};", table, config.username));
+        sqlx::query(sql).execute(&mut *tx).await?;
+    }
+
+    tx.commit().await
 }
