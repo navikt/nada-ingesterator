@@ -3,6 +3,7 @@ use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
 
 mod database;
+mod debezium;
 
 #[tokio::main]
 async fn main() {
