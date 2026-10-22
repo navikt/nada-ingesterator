@@ -1,4 +1,6 @@
+use sqlx::postgres::PgPoolOptions;
 use sqlx::{AssertSqlSafe, Pool, Postgres};
+use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub struct ReplicationConfig {
@@ -8,7 +10,28 @@ pub struct ReplicationConfig {
     pub tables: Vec<String>,
 }
 
-pub async fn setup_logical_replication(pool: &Pool<Postgres>) -> Result<(), sqlx::Error> {
+pub async fn bootstrap_database_for_replication(config: &ReplicationConfig) -> Result<(), sqlx::Error> {
+    let connection_string = "postgres://ingesterator:ingesterator@127.0.0.1:5432";
+
+    println!("Connecting to {}...", connection_string);
+
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(Duration::from_secs(1))
+        .connect(connection_string)
+        .await?;
+
+    println!("Connection success");
+
+    setup_logical_replication(&pool).await?;
+    create_replication_role(&pool, &config).await?;
+
+    println!("Database setup for logical replication");
+
+    Ok(())
+}
+
+async fn setup_logical_replication(pool: &Pool<Postgres>) -> Result<(), sqlx::Error> {
     // Enable logical replication (requires restart)
     // wal_level must be 'logical' for CDC to work
     sqlx::query!("ALTER SYSTEM SET wal_level = 'logical';")
@@ -40,7 +63,7 @@ pub async fn setup_logical_replication(pool: &Pool<Postgres>) -> Result<(), sqlx
 ///
 /// Note that parametrized values are not supported for these kinds of queries,
 /// so we do manual SQL string injection here.
-pub async fn create_replication_role(
+async fn create_replication_role(
     pool: &Pool<Postgres>,
     config: &ReplicationConfig,
 ) -> Result<(), sqlx::Error> {
