@@ -99,7 +99,7 @@ impl<'a> SourceDatabase<'a> {
         let mut tx = self.pool.begin().await?;
 
         let sql = AssertSqlSafe(format!(
-            "REVOKE ALL PRIVILEGES ON SCHEMA {} FROM {};",
+            "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA {} FROM {};",
             &self.config.schema, &self.config.username
         ));
         sqlx::query(sql).execute(&mut *tx).await?;
