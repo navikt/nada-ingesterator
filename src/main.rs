@@ -1,4 +1,3 @@
-use kube::Error;
 use crate::database::ReplicationConfig;
 use tracing::log::error;
 
@@ -10,7 +9,9 @@ mod kubernetes;
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    match kubernetes::init().await{
+    let kube_resource = kubernetes::make_debezium_kubernetes_resource();
+
+    match kubernetes::save_to_kubernetes(&kube_resource).await {
         Ok(_) => {}
         Err(err) => {
             error!("kubernetes: {err}")
