@@ -1,7 +1,9 @@
-use serde::Serialize;
+use kube::CustomResource;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use serde_with::formats::CommaSeparator;
-use serde_with::{serde_as, StringWithSeparator};
+use serde_with::{StringWithSeparator, serde_as};
 
 /// Debezium configuration properties.
 ///
@@ -95,16 +97,30 @@ mod tests {
     }
 }
 
-// apiVersion: debezium.io/v1alpha1
-// kind: DebeziumServer
-// metadata:
-// name: my-debezium-server
-// spec:
-// version: "3.2.0"
-// source: {{postgres_conf}}
-// sink: "{{kafka conf, tror noe ca '{type: kafka, config: {bootstrap.servers: kafka:9092}'}"
-// format: {{format_conf, mener avro greier går her}}
-// runtime: {{runtime_conf, tror vi kan komme unna med default på det meste, men må antagelig confe otel}}
-// transforms: {{ transformation_conf, muligens trenger vi å håndtere tombstone events }}
-// predicates: {{predicate_conf, trenger antagelig ikke dette, mulig å filtrere events}}
-// quarkus: {{quarkus greier som sendes til vel quarkus}}
+/// Debezium server spec for Kubernetes.
+///
+///     version: "3.2.0"
+///     source: {{postgres_conf}}
+///     sink: "{{kafka conf, tror noe ca '{type: kafka, config: {bootstrap.servers: kafka:9092}'}"
+///     format: {{format_conf, mener avro greier går her}}
+///     runtime: {{runtime_conf, tror vi kan komme unna med default på det meste, men må antagelig confe otel}}
+///     transforms: {{ transformation_conf, muligens trenger vi å håndtere tombstone events }}
+///     predicates: {{predicate_conf, trenger antagelig ikke dette, mulig å filtrere events}}
+///     quarkus: {{quarkus greier som sendes til vel quarkus}}
+#[derive(CustomResource, Debug, Serialize, Deserialize, Default, Clone, JsonSchema)]
+#[kube(
+    group = "debezium.io",
+    version = "v1alpha1",
+    kind = "DebeziumServer",
+    namespaced
+)]
+pub struct DebeziumServerSpec {
+    version: String,
+    source: (),
+    sink: (),
+    format: (),
+    runtime: (),
+    transforms: (),
+    predicates: (),
+    quarkus: (),
+}
