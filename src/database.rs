@@ -1,5 +1,5 @@
-use sqlx::postgres::PgPoolOptions;
-use sqlx::{AssertSqlSafe, Pool, Postgres, query};
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use sqlx::{query, AssertSqlSafe, Pool, Postgres};
 use std::time::Duration;
 use tracing::log::{info, warn};
 
@@ -19,33 +19,37 @@ pub struct SourceDatabase<'a> {
 }
 
 impl<'a> SourceDatabase<'a> {
-    pub async fn new(config: &'a ReplicationConfig) -> Result<Self, sqlx::Error> {
-        let connection_string = "postgres://ingesterator:ingesterator@127.0.0.1:5432";
-
-        info!("Connecting to {}...", connection_string);
+    pub async fn new(
+        options: PgConnectOptions,
+        config: &'a ReplicationConfig,
+    ) -> Result<Self, sqlx::Error> {
+        info!(
+            "Connecting to PostgreSQL on {} port {} as '{}'...",
+            options.get_host(),
+            options.get_port(),
+            options.get_username(),
+        );
 
         let pool = PgPoolOptions::new()
             .max_connections(1)
             .acquire_timeout(Duration::from_secs(1))
-            .connect(connection_string)
+            .connect_with(options)
             .await?;
-
-        info!("Connection success");
 
         Ok(Self { pool, config })
     }
 
     pub async fn bootstrap_database_for_replication(&mut self) -> Result<(), sqlx::Error> {
         self.setup_logical_replication().await?;
-        info!("Database configured for logical replication");
+        info!("Logical replication configured");
 
         if self.cdc_user_exists().await? {
-            warn!("Dropping existing CDC replication role and privileges");
+            warn!("Drop existing CDC replication role and privileges");
             self.drop_replication_role().await?;
         }
 
         self.create_replication_role().await?;
-        info!("Replication user configured");
+        info!("Replication role configured");
 
         Ok(())
     }

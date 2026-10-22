@@ -1,4 +1,5 @@
 use crate::database::{ReplicationConfig, SourceDatabase};
+use sqlx::postgres::PgConnectOptions;
 use tracing::log::error;
 
 mod database;
@@ -18,7 +19,7 @@ async fn main() {
         }
     }
 
-    let config = ReplicationConfig {
+    let replication_config = ReplicationConfig {
         username: "cdc_replication".to_string(),
         password: "strong_password".to_string(),
         database: "ingesterator".to_string(),
@@ -26,7 +27,13 @@ async fn main() {
         tables: vec![],
     };
 
-    let mut db = match SourceDatabase::new(&config).await {
+    let postgres_connect_options = PgConnectOptions::new_without_pgpass()
+        .username("ingesterator")
+        .password("ingesterator")
+        .host("127.0.0.1")
+        .port(5432);
+
+    let mut db = match SourceDatabase::new(postgres_connect_options, &replication_config).await {
         Ok(db) => db,
         Err(err) => {
             error!("connect database: {err}");
