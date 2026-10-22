@@ -22,6 +22,7 @@ async fn main() {
         username: "cdc_replication".to_string(),
         password: "strong_password".to_string(),
         database: "ingesterator".to_string(),
+        schema: "public".to_string(),
         tables: vec![],
     };
 

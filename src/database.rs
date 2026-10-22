@@ -1,17 +1,20 @@
 use sqlx::postgres::PgPoolOptions;
-use sqlx::{AssertSqlSafe, Pool, Postgres};
+use sqlx::{AssertSqlSafe, Pool, Postgres, query};
 use std::time::Duration;
-use tracing::log::info;
+use tracing::log::{info, warn};
 
 #[derive(Debug, Clone)]
 pub struct ReplicationConfig {
     pub username: String,
     pub password: String,
     pub database: String,
+    pub schema: String,
     pub tables: Vec<String>,
 }
 
-pub async fn bootstrap_database_for_replication(config: &ReplicationConfig) -> Result<(), sqlx::Error> {
+pub async fn bootstrap_database_for_replication(
+    config: &ReplicationConfig,
+) -> Result<(), sqlx::Error> {
     let connection_string = "postgres://ingesterator:ingesterator@127.0.0.1:5432";
 
     info!("Connecting to {}...", connection_string);
@@ -25,11 +28,32 @@ pub async fn bootstrap_database_for_replication(config: &ReplicationConfig) -> R
     info!("Connection success");
 
     setup_logical_replication(&pool).await?;
-    create_replication_role(&pool, &config).await?;
+    info!("Database configured for logical replication");
 
-    info!("Database setup for logical replication");
+    if cdc_user_exists(&pool, &config).await? {
+        warn!("Dropping existing CDC replication role and privileges");
+        drop_replication_role(&pool, &config).await?;
+    }
+
+    create_replication_role(&pool, &config).await?;
+    info!("Replication user configured");
 
     Ok(())
+}
+
+/// Returns true if the CDC user exists in the database.
+async fn cdc_user_exists(
+    pool: &Pool<Postgres>,
+    config: &ReplicationConfig,
+) -> Result<bool, sqlx::Error> {
+    Ok(query!(
+        "SELECT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = $1);",
+        &config.username
+    )
+    .fetch_one(pool)
+    .await?
+    .exists
+    .unwrap_or_default())
 }
 
 async fn setup_logical_replication(pool: &Pool<Postgres>) -> Result<(), sqlx::Error> {
@@ -58,6 +82,33 @@ async fn setup_logical_replication(pool: &Pool<Postgres>) -> Result<(), sqlx::Er
         .await?;
 
     Ok(())
+}
+
+/// Uninstall the CDC replication user by dropping all their privileges and deleting the role.
+async fn drop_replication_role(
+    pool: &Pool<Postgres>,
+    config: &ReplicationConfig,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    let sql = AssertSqlSafe(format!(
+        "REVOKE ALL PRIVILEGES ON SCHEMA {} FROM {};",
+        config.schema, config.username
+    ));
+    sqlx::query(sql).execute(&mut *tx).await?;
+
+    // Drop any previous privileges on the database.
+    let sql = AssertSqlSafe(format!(
+        "REVOKE ALL PRIVILEGES ON DATABASE {} FROM {};",
+        config.database, config.username
+    ));
+    sqlx::query(sql).execute(&mut *tx).await?;
+
+    // Drop the CDC replication role if it exists.
+    let sql = AssertSqlSafe(format!("DROP ROLE {};", config.username));
+    sqlx::query(sql).execute(&mut *tx).await?;
+
+    tx.commit().await
 }
 
 /// Create a replication user and grant privileges.
