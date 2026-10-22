@@ -24,21 +24,7 @@ pub fn make_debezium_kubernetes_resource() -> DebeziumServer {
         ..Default::default()
     };
 
-    // plugin.name: pgoutput
-    // slot.name: TBD # matcher det vi setter opp ved bootstrap
-    // slot.failover: ? # noe greier her med pg <= 16
-    // publication.name: TBD # må matche bootstrap
-    // database.*: <db params>
-    // topic.prefix: ? # kansje, men må aldri endre en man har satt
-    // [schema|table|column].[include|exclude].list: []
-    // database.ssl*: ?
-    // message.key.columns: ? # muligens ved composite keys
-    // publication.autocreate.mode: disabled # all_tables som er default trenger superuser
-    // heartbeat.interval.ms: ? # må nok justere oss inn etter hvert, starte med hvert 10 sek?
-    // heartbeat.action.query: "INSERT INTO dbz_heartbeat_table (text) VALUES ('dbz_heartbeat')"
-    // lsn.flush.mode: ? # er preview men vi kunne muligens slippe heartbeat
-    // read.only: # må muligens se på den avhengig av rettigheter vi får
-    let config = BTreeMap::new();
+    let config = make_config();
 
     let source = DebeziumServerSource {
         class: Some("io.debezium.connector.postgresql.PostgresConnector".into()),
@@ -64,4 +50,36 @@ pub fn make_debezium_kubernetes_resource() -> DebeziumServer {
         spec,
         status: None,
     }
+}
+
+fn make_config() -> BTreeMap<String, serde_json::Value> {
+    let mut config = BTreeMap::new();
+
+    macro_rules! prop {
+        ($key:expr, $value:expr $(,)?) => {{
+            config.insert($key.into(), $value.into());
+        }};
+    }
+
+    prop!("plugin.name", "pgoutput");
+
+    // The default `all_tables` needs superuser
+    prop!("publication.autocreate.mode", "disabled");
+
+    // Sane default?
+    prop!("heartbeat.interval.ms", 10_000);
+
+    // slot.name: TBD # matcher det vi setter opp ved bootstrap
+    // slot.failover: ? # noe greier her med pg <= 16
+    // publication.name: TBD # må matche bootstrap
+    // database.*: <db params>
+    // topic.prefix: ? # kansje, men må aldri endre en man har satt
+    // [schema|table|column].[include|exclude].list: []
+    // database.ssl*: ?
+    // message.key.columns: ? # muligens ved composite keys
+    // heartbeat.action.query: "INSERT INTO dbz_heartbeat_table (text) VALUES ('dbz_heartbeat')"
+    // lsn.flush.mode: ? # er preview men vi kunne muligens slippe heartbeat
+    // read.only: # må muligens se på den avhengig av rettigheter vi får
+
+    config
 }
