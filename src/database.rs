@@ -1,6 +1,7 @@
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{AssertSqlSafe, Pool, Postgres};
 use std::time::Duration;
+use tracing::log::info;
 
 #[derive(Debug, Clone)]
 pub struct ReplicationConfig {
@@ -13,7 +14,7 @@ pub struct ReplicationConfig {
 pub async fn bootstrap_database_for_replication(config: &ReplicationConfig) -> Result<(), sqlx::Error> {
     let connection_string = "postgres://ingesterator:ingesterator@127.0.0.1:5432";
 
-    println!("Connecting to {}...", connection_string);
+    info!("Connecting to {}...", connection_string);
 
     let pool = PgPoolOptions::new()
         .max_connections(1)
@@ -21,12 +22,12 @@ pub async fn bootstrap_database_for_replication(config: &ReplicationConfig) -> R
         .connect(connection_string)
         .await?;
 
-    println!("Connection success");
+    info!("Connection success");
 
     setup_logical_replication(&pool).await?;
     create_replication_role(&pool, &config).await?;
 
-    println!("Database setup for logical replication");
+    info!("Database setup for logical replication");
 
     Ok(())
 }
