@@ -1,4 +1,4 @@
-use crate::database::ReplicationConfig;
+use crate::database::{ReplicationConfig, SourceDatabase};
 use tracing::log::error;
 
 mod database;
@@ -26,10 +26,16 @@ async fn main() {
         tables: vec![],
     };
 
-    match database::bootstrap_database_for_replication(&config).await {
-        Ok(_) => {}
+    let mut db = match SourceDatabase::new(&config).await {
+        Ok(db) => db,
         Err(err) => {
-            error!("bootstrap database: {err}")
+            error!("connect database: {err}");
+            return;
         }
-    }
+    };
+
+    let _ = db
+        .bootstrap_database_for_replication()
+        .await
+        .inspect_err(|err| error!("bootstrap database: {}", err));
 }
