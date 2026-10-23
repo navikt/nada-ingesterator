@@ -17,6 +17,8 @@ pub async fn save_to_kubernetes(resource: &DebeziumServer) -> Result<(), Error> 
     let debz: Api<DebeziumServer> = Api::namespaced(client, "kimtore");
 
     if let Some(name) = resource.name() {
+        // copy some existing props over to the new object
+        // https://cloudnative-pg.io/docs/1.30/replication/#streaming-replication-support
         if let Some(existing_resource) = debz.get_opt(&name).await? {
             warn!(
                 "Deleting existing DebeziumServer '{}'...",
@@ -106,7 +108,7 @@ fn make_config(
     // lsn.flush.mode: ? # er preview men vi kunne muligens slippe heartbeat
     prop!(
         "heartbeat.action.query",
-        "INSERT INTO dbz_heartbeat_table (text) VALUES ('dbz_heartbeat')"
+        "UPDATE debezium.heartbeat SET timestamp = NOW();"
     );
 
     // slot.name: TBD # matcher det vi setter opp ved bootstrap

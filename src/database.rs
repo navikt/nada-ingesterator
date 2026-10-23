@@ -1,5 +1,5 @@
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
-use sqlx::{query, AssertSqlSafe, Pool, Postgres};
+use sqlx::{AssertSqlSafe, Pool, Postgres, query};
 use std::time::Duration;
 use tracing::log::{info, warn};
 
@@ -51,6 +51,9 @@ impl<'a> SourceDatabase<'a> {
         self.create_replication_role().await?;
         info!("Replication role configured");
 
+        self.create_heartbeat_table().await?;
+        info!("Heartbeat table configured");
+
         Ok(())
     }
 
@@ -99,6 +102,12 @@ impl<'a> SourceDatabase<'a> {
         let mut tx = self.pool.begin().await?;
 
         let sql = AssertSqlSafe(format!(
+            "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA debezium FROM {};",
+            &self.config.username
+        ));
+        sqlx::query(sql).execute(&mut *tx).await?;
+
+        let sql = AssertSqlSafe(format!(
             "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA {} FROM {};",
             &self.config.schema, &self.config.username
         ));
@@ -111,7 +120,17 @@ impl<'a> SourceDatabase<'a> {
         ));
         sqlx::query(sql).execute(&mut *tx).await?;
 
-        // Drop the CDC replication role if it exists.
+        // Drop the heartbeat table
+        sqlx::query("DROP TABLE IF EXISTS debezium.heartbeat;")
+            .execute(&mut *tx)
+            .await?;
+
+        // Drop the debezium schema
+        sqlx::query("DROP SCHEMA debezium;")
+            .execute(&mut *tx)
+            .await?;
+
+        // Finally, drop the CDC replication role if it exists.
         let sql = AssertSqlSafe(format!("DROP ROLE {};", &self.config.username));
         sqlx::query(sql).execute(&mut *tx).await?;
 
@@ -147,6 +166,36 @@ impl<'a> SourceDatabase<'a> {
             ));
             sqlx::query(sql).execute(&mut *tx).await?;
         }
+
+        tx.commit().await
+    }
+
+    async fn create_heartbeat_table(&self) -> Result<(), sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query!("CREATE SCHEMA debezium;")
+            .execute(&mut *tx)
+            .await?;
+
+        sqlx::query!("CREATE TABLE debezium.heartbeat (timestamp TIMESTAMPTZ);")
+            .execute(&mut *tx)
+            .await?;
+
+        sqlx::query("INSERT INTO debezium.heartbeat VALUES (NOW());")
+            .execute(&mut *tx)
+            .await?;
+
+        let sql = AssertSqlSafe(format!(
+            "ALTER TABLE debezium.heartbeat OWNER TO {}",
+            self.config.username
+        ));
+        sqlx::query(sql).execute(&mut *tx).await?;
+
+        // let sql = AssertSqlSafe(format!(
+        //     "GRANT ALL ON debezium.heartbeat TO {}",
+        //     self.config.username
+        // ));
+        // sqlx::query(sql).execute(&mut *tx).await?;
 
         tx.commit().await
     }
