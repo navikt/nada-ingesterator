@@ -1,5 +1,7 @@
 use crate::database::ReplicationConfig;
-use crate::debezium::{DebeziumServer, DebeziumServerSource, DebeziumServerSpec};
+use crate::debezium::{
+    DebeziumServer, DebeziumServerSink, DebeziumServerSource, DebeziumServerSpec,
+};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use kube::api::{DeleteParams, PostParams};
 use kube::runtime::reflector::Lookup;
@@ -45,13 +47,20 @@ pub fn make_debezium_kubernetes_resource(
         ..Default::default()
     };
 
-    let config = make_config(&postgres_options, replication_config);
+    let source_config = make_source_config(&postgres_options, replication_config);
 
     let source = DebeziumServerSource {
         class: Some("io.debezium.connector.postgresql.PostgresConnector".into()),
-        config: Some(config),
+        config: Some(source_config),
         offset: None,
         schema_history: None,
+    };
+
+    let sink_config = make_sink_config(&postgres_options, replication_config);
+
+    let sink = DebeziumServerSink {
+        config: Some(sink_config),
+        r#type: Some("kafka".into()),
     };
 
     let spec = DebeziumServerSpec {
@@ -60,7 +69,7 @@ pub fn make_debezium_kubernetes_resource(
         predicates: None,
         quarkus: None,
         runtime: None,
-        sink: None,
+        sink: Some(sink),
         source: Some(source),
         transforms: None,
         version: None,
@@ -73,7 +82,25 @@ pub fn make_debezium_kubernetes_resource(
     }
 }
 
-fn make_config(
+/// Upstream doc: https://debezium.io/documentation/reference/3.7/operations/debezium-operator.html#debezium-operator-schema-reference-sink-config
+fn make_sink_config(
+    postgres_options: &PgConnectOptions,
+    replication_config: &ReplicationConfig,
+) -> BTreeMap<String, serde_json::Value> {
+    let mut config = BTreeMap::new();
+
+    macro_rules! prop {
+        ($key:expr, $value:expr $(,)?) => {{
+            config.insert($key.into(), $value.into());
+        }};
+    }
+
+    prop!("bootstrap.servers", "kafka:9092");
+
+    config
+}
+
+fn make_source_config(
     postgres_options: &PgConnectOptions,
     replication_config: &ReplicationConfig,
 ) -> BTreeMap<String, serde_json::Value> {
