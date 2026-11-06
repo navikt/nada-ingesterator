@@ -1,59 +1,66 @@
-use crate::database::{ReplicationConfig, SourceDatabase};
-use sqlx::postgres::PgConnectOptions;
-use tracing::log::error;
+use crate::crd::ingesterator::Ingest;
+use clap::{Parser, Subcommand};
+use futures::{StreamExt, TryStreamExt};
+use kube::runtime::{WatchStreamExt, watcher};
+use kube::{Api, Client, CustomResourceExt};
+use tracing::log::info;
 
-mod database;
-mod debezium;
+mod crd;
+#[allow(unused)]
 mod kubernetes;
 
+#[derive(Parser)]
+struct Args {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Print CustomResourceDefinition YAML for the `Ingest` resource to standard output.
+    Crd,
+    /// Run the Ingesterator Kubernetes operator.
+    Run,
+}
+
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
-    let replication_config = ReplicationConfig {
-        username: "cdc_replication".to_string(),
-        password: "strong_password".to_string(),
-        database: "ingesterator".to_string(),
-        schema: "public".to_string(),
-        tables: vec!["foo".to_string(), "bar".to_string()],
-    };
+    let args = Args::parse();
 
-    // for the admin user
-    let postgres_admin_connect_options = PgConnectOptions::new_without_pgpass()
-        .username("ingesterator")
-        .password("ingesterator")
-        .host("127.0.0.1")
-        .port(5432);
-
-    // for the cdc user
-    let postgres_cdc_connect_options = postgres_admin_connect_options
-        .clone()
-        .username(&replication_config.username)
-        .password(&replication_config.password);
-
-    let mut db =
-        match SourceDatabase::new(postgres_admin_connect_options, &replication_config).await {
-            Ok(db) => db,
-            Err(err) => {
-                error!("connect database: {err}");
-                return;
-            }
-        };
-
-    let _ = db
-        .bootstrap_database_for_replication()
-        .await
-        .inspect_err(|err| error!("bootstrap database: {}", err));
-
-    let kube_resource = kubernetes::make_debezium_kubernetes_resource(
-        postgres_cdc_connect_options,
-        &replication_config,
-    );
-
-    match kubernetes::save_to_kubernetes(&kube_resource).await {
-        Ok(_) => {}
-        Err(err) => {
-            error!("kubernetes: {err}")
-        }
+    match args.command {
+        Commands::Crd => generate_crd()?,
+        Commands::Run => run().await?,
     }
+
+    Ok(())
+}
+
+fn generate_crd() -> Result<(), serde_yaml::Error> {
+    let crd = Ingest::crd();
+    let stdout = std::io::stdout().lock();
+    serde_yaml::to_writer(stdout, &crd)?;
+    Ok(())
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    info!("Ingesterator {}", env!("CARGO_PKG_VERSION"));
+
+    info!("Connecting to Kubernetes...");
+    let client = Client::try_default().await?;
+    let ingests: Api<Ingest> = Api::all(client);
+
+    info!("Creating watcher...");
+    let wc = watcher::Config::default();
+    let mut astream = watcher(ingests, wc).applied_objects().boxed();
+
+    info!("Successfully initialized.");
+    info!("Watching for changes on Ingest objects until terminated.");
+
+    while let Some(objekt) = astream.try_next().await? {
+        info!("Saw object: {objekt:?}")
+    }
+
+    Ok(())
 }

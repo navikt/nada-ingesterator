@@ -1,5 +1,4 @@
-use crate::database::ReplicationConfig;
-use crate::debezium::{
+use crate::crd::debezium::{
     DebeziumServer, DebeziumServerSink, DebeziumServerSource, DebeziumServerSpec,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
@@ -11,6 +10,14 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::log::{info, warn};
+
+pub struct ReplicationConfig {
+    pub username: String,
+    pub password: String,
+    pub database: String,
+    pub schema: String,
+    pub tables: Vec<String>,
+}
 
 pub async fn save_to_kubernetes(resource: &DebeziumServer) -> Result<(), Error> {
     info!("Connecting to Kubernetes...");
