@@ -86,13 +86,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             replication_config,
         };
 
-        let debezium_resource = generator::debezium::new(opts);
+        let resources = opts.generate();
 
-        match save_to_kubernetes(client.clone(), &debezium_resource).await {
+        match save_to_kubernetes(client.clone(), &resources.debezium_server).await {
             Ok(_) => info!(
                 "Created Debezium resource {}.{}",
-                debezium_resource.metadata.namespace.unwrap(),
-                debezium_resource.metadata.name.unwrap(),
+                &resources.debezium_server.metadata.namespace.unwrap(),
+                &resources.debezium_server.metadata.name.unwrap(),
             ),
             Err(err) => error!(
                 "Create Debezium resource from Ingest {}.{}: {}",
