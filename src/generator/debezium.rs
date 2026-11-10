@@ -1,11 +1,13 @@
 use crate::crd::debezium::{
-    DebeziumServer, DebeziumServerSink, DebeziumServerSource, DebeziumServerSpec,
+    DebeziumServer, DebeziumServerRuntime, DebeziumServerRuntimeEnvironment,
+    DebeziumServerRuntimeEnvironmentFrom, DebeziumServerRuntimeEnvironmentFromSecretRef,
+    DebeziumServerSink, DebeziumServerSource, DebeziumServerSpec,
 };
 use crate::crd::ingesterator::Ingest;
 use k8s_openapi::api::core::v1::Secret;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
-use kube::Resource;
 use kube::runtime::reflector::Lookup;
+use kube::Resource;
 use sqlx::postgres::PgConnectOptions;
 use std::collections::BTreeMap;
 
@@ -52,14 +54,40 @@ impl<'a> DebeziumOpts<'a> {
             r#type: Some("kafka".into()),
         };
 
+        let secret = self.make_secret();
+
+        let secret_ref = DebeziumServerRuntimeEnvironmentFromSecretRef {
+            name: Some(secret.name().unwrap().to_string()),
+            optional: None,
+        };
+
+        let secret_from = DebeziumServerRuntimeEnvironmentFrom {
+            config_map_ref: None,
+            prefix: None,
+            secret_ref: Some(secret_ref),
+        };
+
+        let runtime = DebeziumServerRuntime {
+            environment: Some(DebeziumServerRuntimeEnvironment {
+                from: Some(vec![secret_from]),
+                vars: None,
+            }),
+            api: None,
+            jmx: None,
+            metrics: None,
+            service_account: None,
+            storage: None,
+            templates: None,
+        };
+
         let spec = DebeziumServerSpec {
             sink: Some(sink),
             source: Some(source),
+            runtime: Some(runtime),
             format: None,
             image: None,
             predicates: None,
             quarkus: None,
-            runtime: None,
             transforms: None,
             version: None,
         };
@@ -69,8 +97,6 @@ impl<'a> DebeziumOpts<'a> {
             spec,
             status: None,
         };
-
-        let secret = Secret::default();
 
         GeneratedResources {
             debezium_server,
@@ -144,15 +170,13 @@ impl<'a> DebeziumOpts<'a> {
         // Sane default?
         prop!("heartbeat.interval.ms", 10_000);
 
-        // Database options. Find a way to use a secret instead of putting it here where everyone can see it.
+        // Database options. Maybe all of these should be in the secret?
         // database.ssl*: ?
         prop!("database.dbname", self.replication_config.database.as_str());
-        prop!(
-            "database.username",
-            self.replication_config.username.as_str()
-        );
         prop!("database.host", self.postgres_options.get_host());
         prop!("database.port", self.postgres_options.get_port());
+        prop!("database.username", "${file:/TODO/credentials.properties:username}");
+        prop!("database.password", "${file:/TODO/credentials.properties:password}");
 
         // Whitelist tables that should be replicated.
         // Should match what we set up in replication bootstrap.

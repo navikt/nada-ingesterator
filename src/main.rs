@@ -1,15 +1,19 @@
-use crate::crd::debezium::DebeziumServer;
 use crate::crd::ingesterator::Ingest;
-use crate::generator::debezium::{DebeziumOpts, ReplicationConfig};
+use crate::generator::debezium::{DebeziumOpts, GeneratedResources, ReplicationConfig};
 use clap::{Parser, Subcommand};
 use futures::{StreamExt, TryStreamExt};
+use k8s_openapi::NamespaceResourceScope;
 use kube::api::{DeleteParams, PostParams};
+use kube::runtime::reflector::Lookup;
 use kube::runtime::{WatchStreamExt, watcher};
-use kube::{Api, Client, CustomResourceExt, Error, ResourceExt};
+use kube::{Api, Client, CustomResourceExt, Error, Resource};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use sqlx::postgres::PgConnectOptions;
+use std::fmt::Debug;
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::log::{error, info, warn};
+use tracing::log::{debug, error, info, warn};
 
 mod crd;
 #[allow(unused)]
@@ -88,7 +92,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         let resources = opts.generate();
 
-        match save_to_kubernetes(client.clone(), &resources.debezium_server).await {
+        match save_all_to_kubernetes(client.clone(), &resources).await {
             Ok(_) => info!(
                 "Created Debezium resource {}.{}",
                 &resources.debezium_server.metadata.namespace.unwrap(),
@@ -106,26 +110,45 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn save_to_kubernetes(client: Client, resource: &DebeziumServer) -> Result<(), Error> {
-    info!("Connecting to Kubernetes...");
+async fn save_all_to_kubernetes(
+    client: Client,
+    resources: &GeneratedResources,
+) -> Result<(), Error> {
+    save_to_kubernetes_dyn(client.clone(), &resources.secret).await?;
+    save_to_kubernetes_dyn(client.clone(), &resources.debezium_server).await?;
+    Ok(())
+}
 
-    let debz: Api<DebeziumServer> = Api::namespaced(client, "kimtore");
+/// Forcefully save a resource to Kubernetes.
+///
+/// If the object exists, it is deleted and replaced with a new resource.
+async fn save_to_kubernetes_dyn<T>(client: Client, resource: &T) -> Result<(), Error>
+where
+    T: Resource<Scope = NamespaceResourceScope> + Serialize + Clone + Debug + DeserializeOwned,
+    <T as kube::Resource>::DynamicType: Default,
+{
+    let name = resource.name().unwrap_or_default();
+    let namespace = resource.namespace().unwrap_or_default();
+    let debz: Api<T> = Api::namespaced(client, &namespace);
 
-    if let Some(name) = &resource.metadata.name {
+    debug!("Creating X resource '{}.{}'...", namespace, name);
+
+    if let Some(name) = resource.name() {
         // copy some existing props over to the new object
         // https://cloudnative-pg.io/docs/1.30/replication/#streaming-replication-support
         if let Some(existing_resource) = debz.get_opt(&name).await? {
             warn!(
-                "Deleting existing DebeziumServer '{}'...",
-                existing_resource.name_any()
+                "Deleting existing resource '{}'...",
+                existing_resource.name().unwrap_or_default().to_string(),
             );
             debz.delete(&name, &DeleteParams::foreground()).await?;
             sleep(Duration::from_millis(50)).await; // hack to prevent race condition
         }
     }
 
-    info!("Creating DebeziumServer...");
-    debz.create(&PostParams::default(), &resource).await?;
+    debz.create(&PostParams::default(), resource).await?;
+
+    info!("Created X resource '{}.{}'", namespace, name);
 
     Ok(())
 }
