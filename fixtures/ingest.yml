@@ -1,0 +1,9 @@
+kind: Ingest
+apiVersion: data.nav.no/v1
+metadata:
+  name: test
+  namespace: kimtore
+spec:
+  environment: dev-gcp
+  team: dataplattform
+  postgres: ingtest-1
