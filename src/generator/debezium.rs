@@ -114,18 +114,10 @@ impl<'a> DebeziumOpts<'a> {
     ///     username = foo
     ///     password = bar
     fn make_secret(&self) -> Secret {
-        let mut string_data = BTreeMap::new();
-        let mut propfile = String::new();
+        let mut variables = BTreeMap::new();
 
-        propfile.push_str("username = ".into());
-        propfile.push_str(&self.replication_config.username);
-        propfile.push_str("\n");
-
-        propfile.push_str("password = ".into());
-        propfile.push_str(&self.replication_config.password);
-        propfile.push_str("\n");
-
-        string_data.insert("credentials.properties".to_string(), propfile);
+        variables.insert("INGEST_DB_USERNAME".into(), self.replication_config.username.clone());
+        variables.insert("INGEST_DB_PASSWORD".into(), self.replication_config.password.clone());
 
         Secret {
             metadata: ObjectMeta {
@@ -133,7 +125,7 @@ impl<'a> DebeziumOpts<'a> {
                 namespace: self.ingest.metadata.namespace.as_ref().cloned(),
                 ..Default::default()
             },
-            string_data: Some(string_data),
+            string_data: Some(variables),
             ..Default::default()
         }
     }
@@ -175,8 +167,8 @@ impl<'a> DebeziumOpts<'a> {
         prop!("database.dbname", self.replication_config.database.as_str());
         prop!("database.host", self.postgres_options.get_host());
         prop!("database.port", self.postgres_options.get_port());
-        prop!("database.username", "${file:/TODO/credentials.properties:username}");
-        prop!("database.password", "${file:/TODO/credentials.properties:password}");
+        prop!("database.username", "${INGEST_DB_USERNAME}");
+        prop!("database.password", "${INGEST_DB_PASSWORD}");
 
         // Whitelist tables that should be replicated.
         // Should match what we set up in replication bootstrap.
