@@ -1,15 +1,17 @@
 use crate::crd::debezium::{
     DebeziumServer, DebeziumServerSink, DebeziumServerSource, DebeziumServerSpec,
 };
+use crate::crd::ingesterator::Ingest;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
-use kube::api::{DeleteParams, PostParams};
 use kube::runtime::reflector::Lookup;
-use kube::{Api, Client, Error, ResourceExt};
 use sqlx::postgres::PgConnectOptions;
 use std::collections::BTreeMap;
-use std::time::Duration;
-use tokio::time::sleep;
-use tracing::log::{info, warn};
+
+pub struct DebeziumOpts<'a> {
+    pub ingest: &'a Ingest,
+    pub postgres_options: PgConnectOptions,
+    pub replication_config: ReplicationConfig,
+}
 
 pub struct ReplicationConfig {
     pub username: String,
@@ -19,42 +21,14 @@ pub struct ReplicationConfig {
     pub tables: Vec<String>,
 }
 
-pub async fn save_to_kubernetes(resource: &DebeziumServer) -> Result<(), Error> {
-    info!("Connecting to Kubernetes...");
-    let client = Client::try_default().await?;
-
-    let debz: Api<DebeziumServer> = Api::namespaced(client, "kimtore");
-
-    if let Some(name) = resource.name() {
-        // copy some existing props over to the new object
-        // https://cloudnative-pg.io/docs/1.30/replication/#streaming-replication-support
-        if let Some(existing_resource) = debz.get_opt(&name).await? {
-            warn!(
-                "Deleting existing DebeziumServer '{}'...",
-                existing_resource.name_any()
-            );
-            debz.delete(&name, &DeleteParams::foreground()).await?;
-            sleep(Duration::from_millis(50)).await; // hack to prevent race condition
-        }
-    }
-
-    info!("Creating DebeziumServer...");
-    debz.create(&PostParams::default(), &resource).await?;
-
-    Ok(())
-}
-
-pub fn make_debezium_kubernetes_resource(
-    postgres_options: PgConnectOptions,
-    replication_config: &ReplicationConfig,
-) -> DebeziumServer {
+pub fn new(opts: DebeziumOpts) -> DebeziumServer {
     let metadata = ObjectMeta {
-        name: Some("kimtore".into()),
-        namespace: Some("kimtore".into()),
+        name: opts.ingest.name().map(|x| x.to_string()),
+        namespace: opts.ingest.namespace().map(|x| x.to_string()),
         ..Default::default()
     };
 
-    let source_config = make_source_config(&postgres_options, replication_config);
+    let source_config = make_source_config(&opts.postgres_options, &opts.replication_config);
 
     let source = DebeziumServerSource {
         class: Some("io.debezium.connector.postgresql.PostgresConnector".into()),
@@ -63,7 +37,7 @@ pub fn make_debezium_kubernetes_resource(
         schema_history: None,
     };
 
-    let sink_config = make_sink_config(&postgres_options, replication_config);
+    let sink_config = make_sink_config(&opts.postgres_options, &opts.replication_config);
 
     let sink = DebeziumServerSink {
         config: Some(sink_config),
@@ -71,13 +45,13 @@ pub fn make_debezium_kubernetes_resource(
     };
 
     let spec = DebeziumServerSpec {
+        sink: Some(sink),
+        source: Some(source),
         format: None,
         image: None,
         predicates: None,
         quarkus: None,
         runtime: None,
-        sink: Some(sink),
-        source: Some(source),
         transforms: None,
         version: None,
     };
@@ -88,7 +62,6 @@ pub fn make_debezium_kubernetes_resource(
         status: None,
     }
 }
-
 /// Upstream doc: https://debezium.io/documentation/reference/3.7/operations/debezium-operator.html#debezium-operator-schema-reference-sink-config
 fn make_sink_config(
     postgres_options: &PgConnectOptions,
