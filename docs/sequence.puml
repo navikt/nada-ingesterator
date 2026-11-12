@@ -1,0 +1,52 @@
+@startuml
+title Ingesterator process flow
+
+' Define Participants
+actor User
+participant "Nada CLI" as NadaCLI
+participant "Nais Postgres" as Postgres
+participant "Nais DNS" as NaisDNS
+participant "Ingesterator" as Ingesterator
+participant "Debezium Operator" as DebeziumOperator
+participant "Kubernetes" as Panda
+participant Debezium
+participant Kafka
+
+User -> NadaCLI: Run "nada ingest enable"
+NadaCLI -> Postgres: Configure server parameters
+NadaCLI -> Postgres: Add replication user role
+NadaCLI -> Postgres: Add schema and heartbeat table
+NadaCLI -> Ingesterator: Request replication setup
+
+note right
+Postgres instance qualifier
+and replication user credentials
+end note
+
+Ingesterator -> Panda: Generate Secret
+Panda --> Ingesterator
+Ingesterator -> Panda: Generate Ingest
+Panda --> Ingesterator
+Ingesterator --> NadaCLI: Success
+NadaCLI --> User: Success
+
+loop Kubernetes operators
+    Panda -> Ingesterator: Updates to Ingest resource
+    Ingesterator -> NaisDNS: Lookup Postgres pod IPs
+    NaisDNS --> Ingesterator: Return DNS record
+    Ingesterator -> Panda: Generate DebeziumServer
+    Panda -> DebeziumOperator: Refresh
+    DebeziumOperator -> Panda: Create Debezium deployment
+    Panda -> Debezium: Provision and start
+end
+
+loop Continuous Data Capture
+    Debezium -> Postgres: WAL replication data stream through direct TCP connection
+    Postgres --> Debezium:
+    loop Stream to Kafka
+        Debezium -> Debezium: Encode row change as message
+        Debezium -> Kafka: Produce message
+    end
+end
+
+@enduml
