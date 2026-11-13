@@ -1,5 +1,6 @@
 @startuml
 title Ingesterator process flow
+'skinparam backgroundColor #FFFFFF
 
 ' Define Participants
 actor User
